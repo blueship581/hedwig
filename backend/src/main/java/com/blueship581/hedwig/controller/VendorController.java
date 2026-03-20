@@ -4,6 +4,7 @@ import com.blueship581.hedwig.dto.ConnectByLoginRequest;
 import com.blueship581.hedwig.dto.ConnectByTokenRequest;
 import com.blueship581.hedwig.dto.VendorConnectionDto;
 import com.blueship581.hedwig.service.VendorConnectionService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -28,14 +29,14 @@ public class VendorController {
     @PostMapping("/connections/token")
     public ResponseEntity<VendorConnectionDto> connectByToken(
             @AuthenticationPrincipal UserDetails user,
-            @RequestBody ConnectByTokenRequest request) {
+            @Valid @RequestBody ConnectByTokenRequest request) {
         return ResponseEntity.ok(vendorConnectionService.connectByToken(user.getUsername(), request));
     }
 
     @PostMapping("/connections/login")
     public ResponseEntity<VendorConnectionDto> connectByLogin(
             @AuthenticationPrincipal UserDetails user,
-            @RequestBody ConnectByLoginRequest request) {
+            @Valid @RequestBody ConnectByLoginRequest request) {
         return ResponseEntity.ok(vendorConnectionService.connectByLogin(user.getUsername(), request));
     }
 

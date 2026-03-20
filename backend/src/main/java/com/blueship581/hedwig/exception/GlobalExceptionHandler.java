@@ -1,64 +1,96 @@
 package com.blueship581.hedwig.exception;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpStatus;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
-import java.time.Instant;
-import java.util.Map;
+import java.util.Objects;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    @ExceptionHandler(AuthException.class)
-    public ResponseEntity<Map<String, Object>> handleAuthException(AuthException e) {
-        return error(HttpStatus.BAD_REQUEST, e.getMessage());
+    @ExceptionHandler(ApiException.class)
+    public ResponseEntity<ApiErrorResponse> handleApiException(ApiException e, HttpServletRequest request) {
+        ErrorCode errorCode = e.getErrorCode();
+        if (errorCode == ErrorCode.UPSTREAM_SERVICE_ERROR || errorCode == ErrorCode.INTERNAL_SERVER_ERROR) {
+            log.error("API exception: {}", e.getMessage(), e);
+        } else {
+            log.warn("API exception: {}", e.getMessage());
+        }
+        return error(errorCode, e.getUserMessage(), request);
     }
 
     @ExceptionHandler(BadCredentialsException.class)
-    public ResponseEntity<Map<String, Object>> handleBadCredentials(BadCredentialsException e) {
-        return error(HttpStatus.UNAUTHORIZED, "用户名或密码错误");
+    public ResponseEntity<ApiErrorResponse> handleBadCredentials(BadCredentialsException e,
+                                                                 HttpServletRequest request) {
+        return error(ErrorCode.AUTHENTICATION_FAILED, null, request);
     }
 
-    @ExceptionHandler(ResourceNotFoundException.class)
-    public ResponseEntity<Map<String, Object>> handleNotFound(ResourceNotFoundException e) {
-        return error(HttpStatus.NOT_FOUND, e.getMessage());
+    @ExceptionHandler(UsernameNotFoundException.class)
+    public ResponseEntity<ApiErrorResponse> handleUsernameNotFound(UsernameNotFoundException e,
+                                                                   HttpServletRequest request) {
+        log.warn("Username not found: {}", e.getMessage());
+        return error(ErrorCode.UNAUTHORIZED, "登录状态已失效，请重新登录", request);
     }
 
-    @ExceptionHandler(VendorException.class)
-    public ResponseEntity<Map<String, Object>> handleVendorException(VendorException e) {
-        log.error("Vendor error: {}", e.getMessage(), e);
-        return error(HttpStatus.BAD_GATEWAY, e.getMessage());
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiErrorResponse> handleValidationException(MethodArgumentNotValidException e,
+                                                                      HttpServletRequest request) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(FieldError::getDefaultMessage)
+                .filter(Objects::nonNull)
+                .distinct()
+                .reduce((left, right) -> left + "；" + right)
+                .orElse(ErrorCode.VALIDATION_ERROR.getDefaultMessage());
+        return error(ErrorCode.VALIDATION_ERROR, message, request);
+    }
+
+    @ExceptionHandler({MethodArgumentTypeMismatchException.class, IllegalArgumentException.class})
+    public ResponseEntity<ApiErrorResponse> handleBadRequest(Exception e, HttpServletRequest request) {
+        log.warn("Bad request: {}", e.getMessage());
+        return error(ErrorCode.BAD_REQUEST, e.getMessage(), request);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiErrorResponse> handleMessageNotReadable(HttpMessageNotReadableException e,
+                                                                     HttpServletRequest request) {
+        ApiException apiException = unwrapApiException(e);
+        if (apiException != null) {
+            return error(apiException.getErrorCode(), apiException.getUserMessage(), request);
+        }
+        return error(ErrorCode.BAD_REQUEST, "请求体格式不正确，请检查后重试", request);
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<Map<String, Object>> handleGeneric(Exception e) {
+    public ResponseEntity<ApiErrorResponse> handleGeneric(Exception e, HttpServletRequest request) {
         log.error("Unexpected error", e);
-        return error(HttpStatus.INTERNAL_SERVER_ERROR, "系统出现异常，请稍后重试");
+        return error(ErrorCode.INTERNAL_SERVER_ERROR, null, request);
     }
 
-    private ResponseEntity<Map<String, Object>> error(HttpStatus status, String message) {
-        return ResponseEntity.status(status).body(Map.of(
-                "timestamp", Instant.now().toString(),
-                "status", status.value(),
-                "error", localizeStatus(status),
-                "message", message
-        ));
+    private ResponseEntity<ApiErrorResponse> error(ErrorCode errorCode,
+                                                   String message,
+                                                   HttpServletRequest request) {
+        return ResponseEntity.status(errorCode.getStatus())
+                .body(ApiErrorResponse.of(errorCode, message, request.getRequestURI()));
     }
 
-    private String localizeStatus(HttpStatus status) {
-        return switch (status) {
-            case BAD_REQUEST -> "请求参数错误";
-            case UNAUTHORIZED -> "未登录";
-            case FORBIDDEN -> "禁止访问";
-            case NOT_FOUND -> "资源不存在";
-            case BAD_GATEWAY -> "上游服务异常";
-            case INTERNAL_SERVER_ERROR -> "服务器内部错误";
-            default -> status.getReasonPhrase();
-        };
+    private ApiException unwrapApiException(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (current instanceof ApiException apiException) {
+                return apiException;
+            }
+            current = current.getCause();
+        }
+        return null;
     }
 }

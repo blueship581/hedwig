@@ -1,6 +1,7 @@
 package com.blueship581.hedwig.config;
 
 import com.blueship581.hedwig.domain.repository.GatewayUserRepository;
+import com.blueship581.hedwig.exception.AuthException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -23,7 +24,7 @@ public class UserDetailsServiceConfig {
                         .password(user.getPasswordHash())
                         .roles("USER")
                         .build())
-                .orElseThrow(() -> new UsernameNotFoundException("用户不存在：" + username));
+                .orElseThrow(() -> new UsernameNotFoundException(AuthException.sessionExpired(username).getMessage()));
     }
 
     @Bean
