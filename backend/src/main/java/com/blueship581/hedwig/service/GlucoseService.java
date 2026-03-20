@@ -37,9 +37,9 @@ public class GlucoseService {
     @Transactional
     public GlucoseReadingDto fetchLatest(Long connectionId, Long subjectId) {
         VendorConnection connection = connectionRepository.findById(connectionId)
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + connectionId));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(connectionId));
         MonitoredSubject subject = subjectRepository.findById(subjectId)
-                .orElseThrow(() -> new ResourceNotFoundException("监测对象不存在：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.monitoredSubject(subjectId));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorSubject vendorSubject = toVendorSubject(subject);
@@ -50,16 +50,16 @@ public class GlucoseService {
         saveIfNew(subject.getId(), latest);
         GlucoseReading reading = readingRepository
                 .findTopByMonitoredSubjectIdOrderByReadingTimeDesc(subject.getId())
-                .orElseThrow(() -> new ResourceNotFoundException("同步后仍未获取到监测对象的血糖读数：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.syncedGlucoseReadings(subjectId));
         return toDto(reading);
     }
 
     @Transactional
     public List<GlucoseReadingDto> fetchHistory(Long connectionId, Long subjectId) {
         VendorConnection connection = connectionRepository.findById(connectionId)
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + connectionId));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(connectionId));
         MonitoredSubject subject = subjectRepository.findById(subjectId)
-                .orElseThrow(() -> new ResourceNotFoundException("监测对象不存在：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.monitoredSubject(subjectId));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorSubject vendorSubject = toVendorSubject(subject);
@@ -98,7 +98,7 @@ public class GlucoseService {
                     return readingRepository.findTopByMonitoredSubjectIdOrderByReadingTimeDesc(subjectId);
                 })
                 .map(this::toDto)
-                .orElseThrow(() -> new ResourceNotFoundException("未找到监测对象的血糖读数：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.glucoseReadings(subjectId));
     }
 
     /**
@@ -113,9 +113,9 @@ public class GlucoseService {
     @Transactional
     public SyncResultDto syncHistory(Long subjectId) {
         MonitoredSubject subject = subjectRepository.findById(subjectId)
-                .orElseThrow(() -> new ResourceNotFoundException("监测对象不存在：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.monitoredSubject(subjectId));
         VendorConnection connection = connectionRepository.findById(subject.getVendorConnectionId())
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + subject.getVendorConnectionId()));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(subject.getVendorConnectionId()));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorSubject vendorSubject = toVendorSubject(subject);
@@ -161,9 +161,9 @@ public class GlucoseService {
     @Transactional
     public boolean pollLatest(Long connectionId, Long subjectId) {
         VendorConnection connection = connectionRepository.findById(connectionId)
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + connectionId));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(connectionId));
         MonitoredSubject subject = subjectRepository.findById(subjectId)
-                .orElseThrow(() -> new ResourceNotFoundException("监测对象不存在：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.monitoredSubject(subjectId));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorSubject vendorSubject = toVendorSubject(subject);
@@ -199,9 +199,9 @@ public class GlucoseService {
 
     private List<GlucoseReading> fetchHistoryEntitiesForSubject(Long subjectId) {
         MonitoredSubject subject = subjectRepository.findById(subjectId)
-                .orElseThrow(() -> new ResourceNotFoundException("监测对象不存在：" + subjectId));
+                .orElseThrow(() -> ResourceNotFoundException.monitoredSubject(subjectId));
         VendorConnection connection = connectionRepository.findById(subject.getVendorConnectionId())
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + subject.getVendorConnectionId()));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(subject.getVendorConnectionId()));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorSubject vendorSubject = toVendorSubject(subject);

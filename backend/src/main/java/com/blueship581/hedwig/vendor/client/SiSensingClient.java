@@ -1,6 +1,7 @@
 package com.blueship581.hedwig.vendor.client;
 
 import com.blueship581.hedwig.domain.enums.TrendDirection;
+import com.blueship581.hedwig.exception.BadRequestException;
 import com.blueship581.hedwig.exception.VendorException;
 import com.blueship581.hedwig.vendor.model.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -86,7 +87,7 @@ public class SiSensingClient implements VendorClient {
             }
             throw apiError("校验访问令牌", e);
         } catch (Exception e) {
-            throw new VendorException("硅基轻享访问令牌校验失败，请稍后重试", e);
+            throw VendorException.tokenValidationFailed("硅基轻享", e);
         }
     }
 
@@ -96,7 +97,7 @@ public class SiSensingClient implements VendorClient {
         String password = normalizeCredential(loginRequest.getPassword());
 
         if (phone == null || password == null) {
-            throw new VendorException("请输入硅基账号（手机号）和密码");
+            throw new BadRequestException("请输入厂商账号和密码");
         }
 
         try {
@@ -112,25 +113,25 @@ public class SiSensingClient implements VendorClient {
                     .block();
 
             if (response == null) {
-                throw new VendorException("硅基轻享登录接口返回为空");
+                throw VendorException.responseInvalid("硅基轻享", "完成登录", "登录接口返回为空");
             }
 
             if (isFailureResponse(response)) {
                 String detail = extractErrorDetail(response.toString());
-                if (detail == null || detail.isBlank()) {
-                    throw new VendorException("硅基轻享账号密码登录失败");
-                }
-                throw new VendorException("硅基轻享账号密码登录失败：" + detail);
+                throw VendorException.loginFailed(
+                        "硅基轻享",
+                        detail == null || detail.isBlank() ? "账号密码错误" : detail
+                );
             }
 
             String token = extractLoginToken(response);
             if (token == null || token.isBlank()) {
-                throw new VendorException("硅基轻享登录成功，但未返回访问令牌");
+                throw VendorException.responseInvalid("硅基轻享", "完成登录", "未返回访问令牌");
             }
 
             VendorTokenInfo tokenInfo = validateToken(token);
             if (!tokenInfo.isValid()) {
-                throw new VendorException("硅基轻享登录成功，但返回的访问令牌校验失败");
+                throw VendorException.responseInvalid("硅基轻享", "完成登录", "返回的访问令牌校验失败");
             }
             return tokenInfo;
 
@@ -139,7 +140,7 @@ public class SiSensingClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("账号密码登录", e);
         } catch (Exception e) {
-            throw new VendorException("硅基轻享账号密码登录失败", e);
+            throw new VendorException("硅基轻享账号登录失败，请检查账号和密码后重试", "硅基轻享登录异常", e);
         }
     }
 
@@ -159,15 +160,16 @@ public class SiSensingClient implements VendorClient {
                     .block();
 
             if (response == null) {
-                throw new VendorException("硅基轻享接口返回为空：获取监测对象列表");
+                throw VendorException.responseInvalid("硅基轻享", "获取监测对象列表", "接口返回为空");
             }
 
             if (isFailureResponse(response)) {
                 String detail = extractErrorDetail(response.toString());
-                if (detail == null || detail.isBlank()) {
-                    throw new VendorException("硅基轻享接口返回异常：获取监测对象列表");
-                }
-                throw new VendorException("硅基轻享接口返回异常：获取监测对象列表：" + detail);
+                throw VendorException.responseInvalid(
+                        "硅基轻享",
+                        "获取监测对象列表",
+                        detail == null || detail.isBlank() ? "接口返回异常" : detail
+                );
             }
 
             JsonNode payload = extractResponseData(response);
@@ -209,7 +211,7 @@ public class SiSensingClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取监测对象列表", e);
         } catch (Exception e) {
-            throw new VendorException("获取硅基轻享监测对象列表失败", e);
+            throw VendorException.serviceUnavailable("硅基轻享", "获取监测对象列表", e.getMessage(), e);
         }
     }
 
@@ -235,7 +237,7 @@ public class SiSensingClient implements VendorClient {
                     .block();
 
             if (response == null || isFailureResponse(response)) {
-                throw new VendorException("硅基轻享接口返回异常：获取实时血糖数据");
+                throw VendorException.responseInvalid("硅基轻享", "获取实时血糖数据", "接口返回异常");
             }
 
             JsonNode payload = extractResponseData(response);
@@ -302,7 +304,7 @@ public class SiSensingClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取实时血糖数据", e);
         } catch (Exception e) {
-            throw new VendorException("获取硅基轻享实时血糖数据失败", e);
+            throw VendorException.serviceUnavailable("硅基轻享", "获取实时血糖数据", e.getMessage(), e);
         }
     }
 
@@ -310,7 +312,7 @@ public class SiSensingClient implements VendorClient {
     public VendorGlucoseData getLatestGlucose(String accessToken, String vendorUserId, VendorSubject subject) {
         List<VendorGlucoseData> history = getHistoricalGlucose(accessToken, vendorUserId, subject);
         if (history.isEmpty()) {
-            throw new VendorException("监测对象暂无血糖数据：" + subject.getSubjectId());
+            throw VendorException.noGlucoseData("硅基轻享", subject.getSubjectId());
         }
         return history.get(history.size() - 1);
     }
@@ -329,15 +331,16 @@ public class SiSensingClient implements VendorClient {
                     .block();
 
             if (response == null) {
-                throw new VendorException("硅基轻享接口返回为空：获取历史血糖数据");
+                throw VendorException.responseInvalid("硅基轻享", "获取历史血糖数据", "接口返回为空");
             }
 
             if (isFailureResponse(response)) {
                 String detail = extractErrorDetail(response.toString());
-                if (detail == null || detail.isBlank()) {
-                    throw new VendorException("硅基轻享接口返回异常：获取历史血糖数据");
-                }
-                throw new VendorException("硅基轻享接口返回异常：获取历史血糖数据：" + detail);
+                throw VendorException.responseInvalid(
+                        "硅基轻享",
+                        "获取历史血糖数据",
+                        detail == null || detail.isBlank() ? "接口返回异常" : detail
+                );
             }
 
             JsonNode payload = extractResponseData(response);
@@ -376,21 +379,16 @@ public class SiSensingClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取历史血糖数据", e);
         } catch (Exception e) {
-            throw new VendorException("获取硅基轻享历史血糖数据失败", e);
+            throw VendorException.serviceUnavailable("硅基轻享", "获取历史血糖数据", e.getMessage(), e);
         }
     }
 
     private VendorException apiError(String operation, WebClientResponseException e) {
         String detail = extractErrorDetail(e.getResponseBodyAsString());
-        String message = String.format(
-                "硅基轻享接口请求失败（%s，HTTP %s）",
-                operation,
-                e.getStatusCode().value()
-        );
-        if (detail == null || detail.isBlank()) {
-            return new VendorException(message, e);
-        }
-        return new VendorException(message + "：" + detail, e);
+        String errorDetail = (detail == null || detail.isBlank())
+                ? "HTTP " + e.getStatusCode().value()
+                : detail;
+        return VendorException.serviceUnavailable("硅基轻享", operation, errorDetail, e);
     }
 
     private String extractErrorDetail(String body) {

@@ -1,5 +1,6 @@
 package com.blueship581.hedwig.domain.enums;
 
+import com.blueship581.hedwig.exception.BadRequestException;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
@@ -18,7 +19,7 @@ public enum VendorType {
     @JsonCreator
     public static VendorType fromValue(String value) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("厂商类型不能为空");
+            throw new BadRequestException("厂商类型不能为空");
         }
 
         String normalized = value.trim()
@@ -29,7 +30,10 @@ public enum VendorType {
         return switch (normalized) {
             case "OTTAI" -> OTTAI;
             case "SISENSING", "SI_SENSING" -> SISENSING;
-            default -> throw new IllegalArgumentException("不支持的厂商类型：" + value);
+            default -> throw new BadRequestException(
+                    "不支持的厂商类型，请检查后重试",
+                    "不支持的厂商类型: " + value
+            );
         };
     }
 

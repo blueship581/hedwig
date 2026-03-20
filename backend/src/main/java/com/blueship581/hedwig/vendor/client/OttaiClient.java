@@ -88,9 +88,7 @@ public class OttaiClient implements VendorClient {
      */
     @Override
     public VendorTokenInfo login(VendorLoginRequest loginRequest) {
-        throw new VendorException(
-                "欧泰暂不支持通过账号密码直接登录，请在微信小程序中抓包获取访问令牌后再连接。"
-        );
+        throw VendorException.unsupportedPasswordLogin("欧泰");
     }
 
     @Override
@@ -146,7 +144,7 @@ public class OttaiClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取监测对象列表", e);
         } catch (Exception e) {
-            throw new VendorException("获取欧泰监测对象列表失败", e);
+            throw VendorException.serviceUnavailable("欧泰", "获取监测对象列表", e.getMessage(), e);
         }
     }
 
@@ -205,7 +203,7 @@ public class OttaiClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取实时血糖数据", e);
         } catch (Exception e) {
-            throw new VendorException("获取欧泰实时血糖数据失败", e);
+            throw VendorException.serviceUnavailable("欧泰", "获取实时血糖数据", e.getMessage(), e);
         }
     }
 
@@ -214,7 +212,7 @@ public class OttaiClient implements VendorClient {
         // The relatives list already contains the latest glucose; use historical endpoint for accuracy
         List<VendorGlucoseData> history = getHistoricalGlucose(accessToken, vendorUserId, subject);
         if (history.isEmpty()) {
-            throw new VendorException("监测对象暂无血糖数据：" + subject.getSubjectId());
+            throw VendorException.noGlucoseData("欧泰", subject.getSubjectId());
         }
         return history.get(history.size() - 1);
     }
@@ -267,7 +265,7 @@ public class OttaiClient implements VendorClient {
         } catch (WebClientResponseException e) {
             throw apiError("获取历史血糖数据", e);
         } catch (Exception e) {
-            throw new VendorException("获取欧泰历史血糖数据失败", e);
+            throw VendorException.serviceUnavailable("欧泰", "获取历史血糖数据", e.getMessage(), e);
         }
     }
 
@@ -290,26 +288,21 @@ public class OttaiClient implements VendorClient {
 
     private void validateResponse(JsonNode response, String operation) {
         if (response == null) {
-            throw new VendorException("欧泰接口返回为空：" + localizeOperation(operation));
+            throw VendorException.responseInvalid("欧泰", localizeOperation(operation), "接口返回为空");
         }
         JsonNode codeNode = response.get("code");
         if (codeNode == null || !"OK".equals(codeNode.asText())) {
             String msg = response.has("msg") ? response.get("msg").asText() : "未知错误";
-            throw new VendorException("欧泰接口返回异常（" + localizeOperation(operation) + "）：" + msg);
+            throw VendorException.responseInvalid("欧泰", localizeOperation(operation), msg);
         }
     }
 
     private VendorException apiError(String operation, WebClientResponseException e) {
         String detail = extractErrorDetail(e.getResponseBodyAsString());
-        String message = String.format(
-                "欧泰接口请求失败（%s，HTTP %s）",
-                operation,
-                e.getStatusCode().value()
-        );
-        if (detail == null || detail.isBlank()) {
-            return new VendorException(message, e);
-        }
-        return new VendorException(message + "：" + detail, e);
+        String errorDetail = (detail == null || detail.isBlank())
+                ? "HTTP " + e.getStatusCode().value()
+                : detail;
+        return VendorException.serviceUnavailable("欧泰", operation, errorDetail, e);
     }
 
     private String extractErrorDetail(String body) {

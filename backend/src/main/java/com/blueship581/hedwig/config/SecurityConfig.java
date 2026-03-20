@@ -1,9 +1,9 @@
 package com.blueship581.hedwig.config;
 
+import com.blueship581.hedwig.exception.ApiErrorResponseWriter;
+import com.blueship581.hedwig.exception.ErrorCode;
 import com.blueship581.hedwig.security.JwtAuthenticationFilter;
-import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.MediaType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -25,6 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final ApiErrorResponseWriter apiErrorResponseWriter;
     private final UserDetailsService userDetailsService;
     private final PasswordEncoder passwordEncoder;
 
@@ -35,20 +36,10 @@ public class SecurityConfig {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                            response.getWriter().write("""
-                                    {"status":401,"error":"未登录","message":"请先登录"}
-                                    """.trim());
-                        })
-                        .accessDeniedHandler((request, response, accessDeniedException) -> {
-                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                            response.getWriter().write("""
-                                    {"status":403,"error":"禁止访问","message":"您没有权限访问该资源"}
-                                    """.trim());
-                        })
+                        .authenticationEntryPoint((request, response, authException) ->
+                                apiErrorResponseWriter.write(response, request, ErrorCode.UNAUTHORIZED, null))
+                        .accessDeniedHandler((request, response, accessDeniedException) ->
+                                apiErrorResponseWriter.write(response, request, ErrorCode.FORBIDDEN, null))
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth

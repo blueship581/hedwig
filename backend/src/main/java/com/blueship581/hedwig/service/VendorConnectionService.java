@@ -10,6 +10,7 @@ import com.blueship581.hedwig.domain.repository.VendorConnectionRepository;
 import com.blueship581.hedwig.dto.ConnectByLoginRequest;
 import com.blueship581.hedwig.dto.ConnectByTokenRequest;
 import com.blueship581.hedwig.dto.VendorConnectionDto;
+import com.blueship581.hedwig.exception.AuthException;
 import com.blueship581.hedwig.exception.ResourceNotFoundException;
 import com.blueship581.hedwig.exception.VendorException;
 import com.blueship581.hedwig.vendor.client.VendorClient;
@@ -51,7 +52,7 @@ public class VendorConnectionService {
                 tokenInfo.isValid(), tokenInfo.getUserId(), tokenInfo.getExpiresAt());
 
         if (!tokenInfo.isValid()) {
-            throw new VendorException("访问令牌无效或已过期，请重新获取后再连接");
+            throw VendorException.invalidAccessToken();
         }
 
         VendorConnection connection = connectionRepository
@@ -84,7 +85,7 @@ public class VendorConnectionService {
                 .build());
 
         if (!tokenInfo.isValid()) {
-            throw new VendorException("厂商账号登录失败，或返回的访问令牌无效");
+            throw VendorException.invalidLoginResult();
         }
 
         VendorConnection connection = connectionRepository
@@ -110,7 +111,7 @@ public class VendorConnectionService {
         GatewayUser user = findUser(username);
         VendorConnection connection = connectionRepository.findById(connectionId)
                 .filter(c -> c.getGatewayUserId().equals(user.getId()))
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + connectionId));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(connectionId));
 
         VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
         VendorTokenInfo tokenInfo = client.validateToken(connection.getAccessToken());
@@ -126,7 +127,7 @@ public class VendorConnectionService {
         GatewayUser user = findUser(username);
         VendorConnection connection = connectionRepository.findById(connectionId)
                 .filter(c -> c.getGatewayUserId().equals(user.getId()))
-                .orElseThrow(() -> new ResourceNotFoundException("设备连接不存在：" + connectionId));
+                .orElseThrow(() -> ResourceNotFoundException.vendorConnection(connectionId));
 
         // Deactivate all subjects for this connection
         subjectRepository.findByVendorConnectionId(connection.getId())
@@ -190,7 +191,7 @@ public class VendorConnectionService {
 
     private GatewayUser findUser(String username) {
         return userRepository.findByUsername(username)
-                .orElseThrow(() -> new UsernameNotFoundException("用户不存在：" + username));
+                .orElseThrow(() -> new UsernameNotFoundException(AuthException.sessionExpired(username).getMessage()));
     }
 
     private VendorConnectionDto toDto(VendorConnection c) {

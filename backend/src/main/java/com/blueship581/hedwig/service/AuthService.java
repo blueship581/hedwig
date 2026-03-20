@@ -5,7 +5,7 @@ import com.blueship581.hedwig.domain.repository.GatewayUserRepository;
 import com.blueship581.hedwig.dto.AuthResponse;
 import com.blueship581.hedwig.dto.LoginRequest;
 import com.blueship581.hedwig.dto.RegisterRequest;
-import com.blueship581.hedwig.exception.AuthException;
+import com.blueship581.hedwig.exception.ConflictException;
 import com.blueship581.hedwig.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -26,7 +26,7 @@ public class AuthService {
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         if (userRepository.existsByUsername(request.getUsername())) {
-            throw new AuthException("用户名已存在：" + request.getUsername());
+            throw ConflictException.usernameAlreadyExists(request.getUsername());
         }
 
         GatewayUser user = GatewayUser.builder()
