@@ -74,6 +74,14 @@ public final class GlucoseTrendCalculator {
     return calculate(currentMmol, previousMmol, null, null);
   }
 
+  /**
+   * 按「5 分钟内的变化量（mmol/L）」直接判定箭头。调用方通常已经拿到 5 分钟窗口的 delta，
+   * 不需要再按时间归一化；用同一个（取整后的）数值判定，界面上的 delta 和箭头才不会打架。
+   */
+  public static TrendDirection classify(double deltaMmol) {
+    return classifyDelta(deltaMmol);
+  }
+
   private static TrendDirection classifyDelta(double delta) {
     double absDelta = Math.abs(delta);
 

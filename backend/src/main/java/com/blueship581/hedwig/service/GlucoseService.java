@@ -34,6 +34,9 @@ import java.util.stream.IntStream;
 @RequiredArgsConstructor
 public class GlucoseService {
 
+  /** 取最新读数时多取几条，保证能找到 5 分钟前的参考点（微泰 1 分钟一条，5 分钟只需 6 条）。 */
+  private static final int TREND_LOOKBACK_ROWS = 12;
+
   private final GlucoseReadingMapper readingMapper;
   private final MonitoredSubjectMapper subjectMapper;
   private final VendorConnectionMapper connectionMapper;
@@ -99,12 +102,13 @@ public class GlucoseService {
     List<GlucoseReading> readings =
         storedReadings.isEmpty() ? fetchHistoryEntitiesForSubject(subjectId) : storedReadings;
 
+    int[] references = referenceIndexes(readings);
     return IntStream.range(0, readings.size())
         .mapToObj(
-            index ->
-                toDto(
-                    readings.get(index),
-                    index + 1 < readings.size() ? readings.get(index + 1) : null))
+            index -> {
+              int ref = references[index];
+              return toDto(readings.get(index), ref >= 0 ? readings.get(ref) : null);
+            })
         .collect(Collectors.toList());
   }
 
@@ -115,10 +119,10 @@ public class GlucoseService {
       return cached.get();
     }
 
-    List<GlucoseReading> latestReadings = loadLatestReadings(subjectId, 2);
+    List<GlucoseReading> latestReadings = loadLatestReadings(subjectId, TREND_LOOKBACK_ROWS);
     if (latestReadings.isEmpty()) {
       fetchHistoryEntitiesForSubject(subjectId);
-      latestReadings = loadLatestReadings(subjectId, 2);
+      latestReadings = loadLatestReadings(subjectId, TREND_LOOKBACK_ROWS);
     }
 
     if (latestReadings.isEmpty()) {
@@ -316,6 +320,65 @@ public class GlucoseService {
         .build();
   }
 
+
+  /** 参考点之间的时间跨度上限：超过 15 分钟的缺口，箭头没有意义。 */
+  private static final long MAX_TREND_GAP_SEC = 900;
+
+  /**
+   * 用「已取整的 5 分钟 delta」判定箭头，保证界面上的数值与箭头一致；
+   * 参考点过于久远（>15 分钟缺口）时返回 NONE。
+   */
+  private static TrendDirection trendFor(
+      GlucoseReading current, GlucoseReading reference, Double delta) {
+    if (delta == null || reference == null) {
+      return TrendDirection.NONE;
+    }
+    Instant currentTime = current.getReadingTime();
+    Instant referenceTime = reference.getReadingTime();
+    if (currentTime == null || referenceTime == null) {
+      return GlucoseTrendCalculator.classify(delta);
+    }
+    long gap = Math.abs(currentTime.getEpochSecond() - referenceTime.getEpochSecond());
+    if (gap > MAX_TREND_GAP_SEC) {
+      return TrendDirection.NONE;
+    }
+    return GlucoseTrendCalculator.classify(delta);
+  }
+
+  /**
+   * 为每条读数（按时间倒序）找到约 {@link GlucoseTrendCalculator#DEFAULT_TREND_WINDOW_SECONDS} 秒前的
+   * 参考读数下标，返回 -1 表示历史不足一个窗口。时间轴单调，用双指针一次扫描完成。
+   */
+  static int[] referenceIndexes(List<GlucoseReading> readingsDesc) {
+    int n = readingsDesc.size();
+    int[] refs = new int[n];
+    int j = 1;
+    for (int i = 0; i < n; i++) {
+      Instant current = readingsDesc.get(i).getReadingTime();
+      if (current == null) {
+        refs[i] = i + 1 < n ? i + 1 : -1;
+        continue;
+      }
+      Instant target = current.minusSeconds(GlucoseTrendCalculator.DEFAULT_TREND_WINDOW_SECONDS);
+      if (j <= i) {
+        j = i + 1;
+      }
+      while (j < n) {
+        Instant candidate = readingsDesc.get(j).getReadingTime();
+        if (candidate == null) {
+          j++;
+          continue;
+        }
+        if (!candidate.isAfter(target)) {
+          break;
+        }
+        j++;
+      }
+      refs[i] = j < n ? j : -1;
+    }
+    return refs;
+  }
+
   private List<GlucoseReading> loadLatestReadings(Long subjectId, int limit) {
     if (limit == Integer.MAX_VALUE) {
       return readingMapper.selectList(
@@ -331,7 +394,7 @@ public class GlucoseService {
   }
 
   private void refreshLatestDataCache(Long subjectId) {
-    List<GlucoseReading> latestReadings = loadLatestReadings(subjectId, 2);
+    List<GlucoseReading> latestReadings = loadLatestReadings(subjectId, TREND_LOOKBACK_ROWS);
     if (latestReadings.isEmpty()) {
       latestSubjectDataCache.evict(subjectId);
       return;
@@ -342,8 +405,9 @@ public class GlucoseService {
   private GlucoseReadingDto cacheLatestReading(
       Long subjectId, List<GlucoseReading> latestReadings) {
     GlucoseReading latest = latestReadings.get(0);
-    GlucoseReading previous = latestReadings.size() > 1 ? latestReadings.get(1) : null;
-    GlucoseReadingDto latestDto = toDto(latest, previous);
+    int refIndex = referenceIndexes(latestReadings)[0];
+    GlucoseReading reference = refIndex >= 0 ? latestReadings.get(refIndex) : null;
+    GlucoseReadingDto latestDto = toDto(latest, reference);
     latestSubjectDataCache.put(
         LatestSubjectData.builder()
             .subjectId(subjectId)
@@ -353,23 +417,25 @@ public class GlucoseService {
     return latestDto;
   }
 
-  private GlucoseReadingDto toDto(GlucoseReading current, GlucoseReading previous) {
-    Double prevMmol = previous == null ? null : previous.getGlucoseMmol();
+  /**
+   * 趋势与 delta 都相对「约 5 分钟前的读数」，与 Nightscout 的箭头语义一致。
+   *
+   * <p>之前 delta/趋势取的是上一条（微泰 1 分钟一条），再按 5 分钟归一化，等于把 1 分钟的波动放大 5 倍：
+   * 下降 0.2 mmol 会被算成 -1.0 / 5min，因而显示成 ↓↓。参考读数改为 5 分钟窗口后，
+   * 同样的 -0.2/5min 会正确落到「→ 平稳」。
+   */
+  private GlucoseReadingDto toDto(GlucoseReading current, GlucoseReading reference) {
+    Double refMmol = reference == null ? null : reference.getGlucoseMmol();
     Double delta =
-        (prevMmol != null && current.getGlucoseMmol() != null)
-            ? Math.round((current.getGlucoseMmol() - prevMmol) * 10.0) / 10.0
+        (refMmol != null && current.getGlucoseMmol() != null)
+            ? Math.round((current.getGlucoseMmol() - refMmol) * 10.0) / 10.0
             : null;
     return GlucoseReadingDto.builder()
         .id(current.getId())
         .monitoredSubjectId(current.getMonitoredSubjectId())
         .glucoseMmol(current.getGlucoseMmol())
         .glucoseMgdl(current.getGlucoseMgdl())
-        .trendDirection(
-            GlucoseTrendCalculator.calculate(
-                current.getGlucoseMmol(),
-                prevMmol,
-                current.getReadingTime(),
-                previous == null ? null : previous.getReadingTime()))
+        .trendDirection(trendFor(current, reference, delta))
         .delta(delta)
         .readingTime(current.getReadingTime())
         .pushedToNightscout(current.getPushedToNightscout())
