@@ -19,7 +19,7 @@ set -euo pipefail
 DEPLOY_PORT="${DEPLOY_PORT:-22}"
 DEPLOY_USER="${DEPLOY_USER:-deploy}"
 APP_DIR="${APP_DIR:-/opt/hedwig}"
-HEALTH_URL="${HEALTH_URL:-http://localhost:8080/health}"
+HEALTH_URL="${HEALTH_URL:-http://localhost:8080/}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-60}"
 
 LOCAL_JAR="build/hedwig.jar"

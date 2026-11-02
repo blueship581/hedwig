@@ -95,6 +95,7 @@ collect_prebuild_paths
 
 echo "[2/4] Building frontend"
 (cd "$FRONTEND_DIR" && npm ci && npm run build)
+bash "$ROOT_DIR/scripts/verify-frontend-dist.sh" "$FRONTEND_DIR/dist"
 
 echo "[3/4] Building backend"
 (cd "$BACKEND_DIR" && mvn clean package -DskipTests -q)

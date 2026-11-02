@@ -63,6 +63,10 @@ create table if not exists vendor_connections (
         unique (gateway_user_id, vendor_type)
 );
 
+-- 已有数据库的增量迁移必须位于列注释前，否则首次启动会因字段尚不存在而失败。
+alter table vendor_connections
+    add column if not exists polling_interval_seconds integer;
+
 comment on table  vendor_connections                            is '厂商连接表，保存 Hedwig 用户与 CGM 厂商账号/令牌的关系';
 comment on column vendor_connections.id                         is '主键ID';
 comment on column vendor_connections.gateway_user_id            is '关联 gateway_users.id';
@@ -300,15 +304,3 @@ create index if not exists idx_push_records_pending_retry
 -- 按目标查询推送记录
 create index if not exists idx_push_records_target_id
     on nightscout_push_records (nightscout_target_id);
-
-
--- ----------------------------------------------------------
--- 7. 增量变更：连接级轮询间隔
--- ----------------------------------------------------------
--- 不同厂商的数据上报节奏不同：微泰（AiDEX X）1 分钟一个点，欧泰/硅基 5 分钟一个点。
--- 为空表示使用厂商默认值（VendorType#defaultPollingIntervalSeconds）。
-alter table vendor_connections
-    add column if not exists polling_interval_seconds integer;
-
-comment on column vendor_connections.polling_interval_seconds
-    is '连接级轮询间隔（秒），为空时使用厂商默认值；微泰默认 60，其他厂商默认 300';

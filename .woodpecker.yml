@@ -7,7 +7,7 @@ variables:
   - &deploy_port "22"
   - &deploy_user "deploy"
   - &app_dir "/opt/hedwig"
-  - &health_url "http://localhost:8080/health"
+  - &health_url "http://localhost:8080/"
   - &health_timeout "60"
 
 steps:

@@ -40,6 +40,7 @@ require_command tar
 
 echo "[2/4] Building frontend"
 (cd "$FRONTEND_DIR" && npm ci && npm run build)
+bash "$ROOT_DIR/scripts/verify-frontend-dist.sh" "$FRONTEND_DIR/dist"
 
 echo "[3/4] Building backend"
 if [[ "${SKIP_TESTS:-0}" == "1" ]]; then
