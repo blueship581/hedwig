@@ -219,20 +219,25 @@ public class NightscoutSyncService {
         .values()
         .forEach(
             readings -> {
+              List<Instant> times =
+                  readings.stream().map(GlucoseReading::getReadingTime).collect(Collectors.toList());
               for (int index = 0; index < readings.size(); index++) {
                 GlucoseReading current = readings.get(index);
-                GlucoseReading previous =
-                    index + 1 < readings.size() ? readings.get(index + 1) : null;
                 if (current.getId() == null) {
                   continue;
                 }
+                int referenceIndex =
+                    GlucoseTrendCalculator.referenceIndex(
+                        times, index, GlucoseTrendCalculator.DEFAULT_TREND_WINDOW_SECONDS);
+                GlucoseReading reference =
+                    referenceIndex >= 0 ? readings.get(referenceIndex) : null;
                 trendByReadingId.put(
                     current.getId(),
                     GlucoseTrendCalculator.calculate(
                         current.getGlucoseMmol(),
-                        previous == null ? null : previous.getGlucoseMmol(),
+                        reference == null ? null : reference.getGlucoseMmol(),
                         current.getReadingTime(),
-                        previous == null ? null : previous.getReadingTime()));
+                        reference == null ? null : reference.getReadingTime()));
               }
             });
 

@@ -25,6 +25,9 @@ jwt:
   expiration: ${JWT_EXPIRATION:86400000}
 
 polling:
+  # 兜底/基准轮询间隔。实际按连接生效：微泰默认 60s，欧泰/硅基默认 300s
+  # （见 VendorType#getDefaultPollingIntervalSeconds，用户可在仪表盘按连接覆盖）。
+  # 下面这组自适应窗口阈值以 5 分钟为基准，短周期厂商会按比例收缩并设下限。
   interval-ms: ${POLLING_INTERVAL_MS:300000}
   early-probe-start-sec: ${POLLING_EARLY_PROBE_START_SEC:25}
   core-radius-sec: ${POLLING_CORE_RADIUS_SEC:5}

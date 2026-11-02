@@ -7,15 +7,21 @@ import com.baomidou.mybatisplus.annotation.EnumValue;
 import java.util.Locale;
 
 public enum VendorType {
-  OTTAI("OTTAI"),
-  SISENSING("SISENSING");
+  OTTAI("OTTAI", 300),
+  SISENSING("SISENSING", 300),
+  /** 微泰 AiDEX X：1 分钟一个血糖点。 */
+  MICROTECH("MICROTECH", 60);
 
   @EnumValue
   @JSONField(value = true)
   private final String jsonValue;
 
-  VendorType(String jsonValue) {
+  /** 厂商数据上报的默认节奏（秒），可作为连接级轮询间隔的兜底值。 */
+  private final int defaultPollingIntervalSeconds;
+
+  VendorType(String jsonValue, int defaultPollingIntervalSeconds) {
     this.jsonValue = jsonValue;
+    this.defaultPollingIntervalSeconds = defaultPollingIntervalSeconds;
   }
 
   @JSONCreator
@@ -29,11 +35,16 @@ public enum VendorType {
     return switch (normalized) {
       case "OTTAI" -> OTTAI;
       case "SISENSING", "SI_SENSING" -> SISENSING;
+      case "MICROTECH", "MICRO_TECH", "WEITAI", "AIDEX", "AIDEX_X" -> MICROTECH;
       default -> throw new IllegalArgumentException("不支持的厂商类型：" + value);
     };
   }
 
   public String toJsonValue() {
     return jsonValue;
+  }
+
+  public int getDefaultPollingIntervalSeconds() {
+    return defaultPollingIntervalSeconds;
   }
 }

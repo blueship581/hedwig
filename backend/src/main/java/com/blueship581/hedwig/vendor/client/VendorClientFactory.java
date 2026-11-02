@@ -10,11 +10,13 @@ public class VendorClientFactory {
 
   private final OttaiClient ottaiClient;
   private final SiSensingClient siSensingClient;
+  private final MicroTechClient microTechClient;
 
   public VendorClient getClient(VendorType vendorType) {
     return switch (vendorType) {
       case OTTAI -> ottaiClient;
       case SISENSING -> siSensingClient;
+      case MICROTECH -> microTechClient;
     };
   }
 }

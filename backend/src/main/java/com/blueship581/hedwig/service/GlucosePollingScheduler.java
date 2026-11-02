@@ -6,6 +6,7 @@ import com.blueship581.hedwig.domain.entity.VendorConnection;
 import com.blueship581.hedwig.domain.enums.TokenStatus;
 import com.blueship581.hedwig.domain.mapper.MonitoredSubjectMapper;
 import com.blueship581.hedwig.domain.mapper.VendorConnectionMapper;
+import com.blueship581.hedwig.exception.VendorTokenInvalidException;
 import com.blueship581.hedwig.vendor.client.OttaiClient;
 import com.blueship581.hedwig.vendor.client.SiSensingClient;
 import com.blueship581.hedwig.vendor.client.VendorClient;
@@ -63,13 +64,16 @@ public class GlucosePollingScheduler {
     }
 
     for (VendorConnection connection : activeConnections) {
-      if (!pollingState.shouldPollNow(connection.getId())) {
+      long intervalMs =
+          VendorConnectionService.effectivePollingIntervalSeconds(connection) * 1000L;
+      if (!pollingState.shouldPollNow(connection.getId(), intervalMs)) {
         if (Instant.now().getEpochSecond() % 30 < 2) {
           log.info(
-              "[tick] conn={} skipped, phase={}, health={}",
+              "[tick] conn={} skipped, phase={}, health={}, interval={}s",
               connection.getId(),
               pollingState.getCurrentPhase(connection.getId()),
-              pollingState.getHealth(connection.getId()));
+              pollingState.getHealth(connection.getId()),
+              intervalMs / 1000);
         }
         continue;
       }
@@ -111,6 +115,8 @@ public class GlucosePollingScheduler {
     for (VendorConnection conn : active) {
       try {
         vendorConnectionService.syncSubjects(conn);
+      } catch (VendorTokenInvalidException e) {
+        markTokenExpired(conn, e);
       } catch (Exception e) {
         log.warn("Subject sync failed for connection {}: {}", conn.getId(), e.getMessage());
       }
@@ -133,12 +139,30 @@ public class GlucosePollingScheduler {
 
     VendorClient client = vendorClientFactory.getClient(connection.getVendorType());
 
-    if (client instanceof OttaiClient ottaiClient) {
-      pollViaRelatives(ottaiClient, connection, subjects);
-    } else if (client instanceof SiSensingClient siSensingClient) {
-      pollViaFollowList(siSensingClient, connection, subjects);
-    } else {
-      pollPerSubject(connection, subjects);
+    try {
+      if (client instanceof OttaiClient ottaiClient) {
+        pollViaRelatives(ottaiClient, connection, subjects);
+      } else if (client instanceof SiSensingClient siSensingClient) {
+        pollViaFollowList(siSensingClient, connection, subjects);
+      } else {
+        pollPerSubject(connection, subjects);
+      }
+    } catch (VendorTokenInvalidException e) {
+      markTokenExpired(connection, e);
+    }
+  }
+
+  /** 令牌失效时停止继续轮询，等待用户重新连接（或 maintenance 任务的自动恢复）。 */
+  private void markTokenExpired(VendorConnection connection, VendorTokenInvalidException e) {
+    log.warn(
+        "Vendor token invalid for connection {} ({}): {}",
+        connection.getId(),
+        connection.getVendorType(),
+        e.getMessage());
+    pollingState.remove(connection.getId());
+    if (connection.getTokenStatus() != TokenStatus.EXPIRED) {
+      connection.setTokenStatus(TokenStatus.EXPIRED);
+      connectionMapper.updateById(connection);
     }
   }
 
@@ -266,6 +290,8 @@ public class GlucosePollingScheduler {
         if (glucoseService.pollLatest(connection.getId(), subject.getId())) {
           hasNew = true;
         }
+      } catch (VendorTokenInvalidException e) {
+        throw e;
       } catch (Exception e) {
         log.error(
             "Failed to poll glucose for subject {} (connection {}): {}",

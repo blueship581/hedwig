@@ -16,4 +16,24 @@ class VendorTypeTest {
 
         assertEquals(VendorType.SISENSING, request.getVendorType());
     }
+
+    @Test
+    void acceptsMicroTechAliases() {
+        assertEquals(VendorType.MICROTECH, VendorType.fromValue("MICROTECH"));
+        assertEquals(VendorType.MICROTECH, VendorType.fromValue("micro_tech"));
+        assertEquals(VendorType.MICROTECH, VendorType.fromValue("weitai"));
+        assertEquals(VendorType.MICROTECH, VendorType.fromValue("aidex-x"));
+    }
+
+    @Test
+    void microTechPollsEveryMinuteByDefault() {
+        assertEquals(60, VendorType.MICROTECH.getDefaultPollingIntervalSeconds());
+        assertEquals(300, VendorType.OTTAI.getDefaultPollingIntervalSeconds());
+        assertEquals(300, VendorType.SISENSING.getDefaultPollingIntervalSeconds());
+    }
+
+    @Test
+    void serializesMicroTechBackToItsStableJsonValue() {
+        assertEquals("MICROTECH", JSON.toJSONString(VendorType.MICROTECH).replace("\"", ""));
+    }
 }

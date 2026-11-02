@@ -35,4 +35,12 @@ public class VendorConnection {
   @Builder.Default private TokenStatus tokenStatus = TokenStatus.ACTIVE;
 
   private Instant lastSyncedAt;
+
+  /**
+   * 连接级轮询间隔（秒）。为空时回落到厂商默认值，见 {@link
+   * VendorType#getDefaultPollingIntervalSeconds()}。
+   *
+   * <p>微泰默认 60 秒（1 分钟一个血糖点），其他厂商默认 300 秒。
+   */
+  private Integer pollingIntervalSeconds;
 }

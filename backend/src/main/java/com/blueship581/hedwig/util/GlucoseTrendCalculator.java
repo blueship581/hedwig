@@ -3,8 +3,15 @@ package com.blueship581.hedwig.util;
 import com.blueship581.hedwig.domain.enums.TrendDirection;
 
 import java.time.Instant;
+import java.util.List;
 
 public final class GlucoseTrendCalculator {
+
+  /**
+   * Trend 参考窗口（秒）。血糖趋势以「5 分钟内的变化速率」为准：5 分钟一个点的厂商（欧泰/硅基）天然满足，
+   * 1 分钟一个点的厂商（微泰）需要回溯到约 5 分钟前的读数，否则单点抖动会被放大成箭头乱跳。
+   */
+  public static final long DEFAULT_TREND_WINDOW_SECONDS = 300;
 
   /**
    * Expected interval between two consecutive CGM readings in seconds. Most CGM sensors produce a
@@ -17,6 +24,7 @@ public final class GlucoseTrendCalculator {
    * are more than 30 minutes apart, the rate-of-change is unreliable.
    */
   private static final long MAX_INTERVAL_SEC = 1800;
+
 
   private GlucoseTrendCalculator() {}
 
@@ -90,5 +98,35 @@ public final class GlucoseTrendCalculator {
       return TrendDirection.SINGLE_DOWN;
     }
     return TrendDirection.FORTY_FIVE_DOWN;
+  }
+
+  /**
+   * 在「按时间倒序」排列的读数里，为下标 {@code index} 的读数挑选趋势参考读数的下标。
+   *
+   * <p>目标是找到「不晚于 index 读数时间 − windowSeconds」的最新一条读数，等价于 5 分钟窗口的起点。
+   * 对 5 分钟一个点的厂商，这正好是上一条读数；对 1 分钟一个点的微泰，则跳过中间 4 条，避免箭头抖动。
+   *
+   * @return 参考读数下标；返回 -1 表示历史不足一个窗口，无法计算趋势
+   */
+  public static int referenceIndex(List<Instant> readingTimesDesc, int index, long windowSeconds) {
+    if (readingTimesDesc == null || index < 0 || index >= readingTimesDesc.size()) {
+      return -1;
+    }
+    Instant current = readingTimesDesc.get(index);
+    if (current == null) {
+      // 没有时间信息时退回「上一条」，保持旧行为
+      return index + 1 < readingTimesDesc.size() ? index + 1 : -1;
+    }
+    Instant target = current.minusSeconds(windowSeconds);
+    for (int i = index + 1; i < readingTimesDesc.size(); i++) {
+      Instant candidate = readingTimesDesc.get(i);
+      if (candidate == null) {
+        continue;
+      }
+      if (!candidate.isAfter(target)) {
+        return i;
+      }
+    }
+    return -1;
   }
 }

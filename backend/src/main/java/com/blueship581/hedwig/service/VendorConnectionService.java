@@ -14,6 +14,7 @@ import com.blueship581.hedwig.dto.VendorConnectionDto;
 import com.blueship581.hedwig.exception.ErrorCode;
 import com.blueship581.hedwig.exception.ResourceNotFoundException;
 import com.blueship581.hedwig.exception.VendorException;
+import com.blueship581.hedwig.exception.VendorTokenInvalidException;
 import com.blueship581.hedwig.vendor.client.VendorClient;
 import com.blueship581.hedwig.vendor.client.VendorClientFactory;
 import com.blueship581.hedwig.vendor.model.VendorLoginRequest;
@@ -199,6 +200,54 @@ public class VendorConnectionService {
     syncSubjects(connection, client);
   }
 
+  /**
+   * 更新连接级轮询间隔。
+   *
+   * <p>不同厂商的数据节奏不同：微泰（AiDEX X）1 分钟一个点，欧泰/硅基 5 分钟一个点。允许用户按需调整，
+   * 例如把微泰调成 2 分钟以进一步降低请求量。
+   *
+   * @param seconds 轮询间隔（秒），传 {@code null} 表示恢复厂商默认值
+   */
+  @Transactional
+  public VendorConnectionDto updatePollingInterval(String username, Long connectionId, Integer seconds) {
+    GatewayUser user = findUser(username);
+    VendorConnection connection =
+        Optional.ofNullable(connectionMapper.selectById(connectionId))
+            .filter(c -> c.getGatewayUserId().equals(user.getId()))
+            .orElseThrow(
+                () ->
+                    new ResourceNotFoundException(
+                        ErrorCode.VENDOR_CONNECTION_NOT_FOUND, "设备连接不存在：" + connectionId));
+
+    if (seconds != null) {
+      int min = 30;
+      int max = 3600;
+      if (seconds < min || seconds > max) {
+        throw new IllegalArgumentException("轮询间隔必须在 " + min + " ~ " + max + " 秒之间");
+      }
+    }
+
+    connection.setPollingIntervalSeconds(seconds);
+    connectionMapper.updateById(connection);
+    log.info(
+        "Polling interval for connection {} ({}) set to {}s",
+        connection.getId(),
+        connection.getVendorType(),
+        seconds == null ? "vendor-default" : seconds);
+    return toDto(connection);
+  }
+
+  /** 实际生效的轮询间隔（秒）：连接设置优先，否则取厂商默认值。 */
+  public static int effectivePollingIntervalSeconds(VendorConnection connection) {
+    Integer override = connection.getPollingIntervalSeconds();
+    if (override != null && override > 0) {
+      return override;
+    }
+    return connection.getVendorType() == null
+        ? 300
+        : connection.getVendorType().getDefaultPollingIntervalSeconds();
+  }
+
   private void syncSubjects(VendorConnection connection, VendorClient client) {
     try {
       List<VendorSubject> vendorSubjects =
@@ -237,6 +286,9 @@ public class VendorConnectionService {
                   .build());
         }
       }
+    } catch (VendorTokenInvalidException e) {
+      // 令牌失效必须让调用方感知：连接阶段直接报错，轮询阶段由调度器把连接标记为 EXPIRED。
+      throw e;
     } catch (Exception e) {
       log.warn("Failed to sync subjects for connection {}: {}", connection.getId(), e.getMessage());
     }
@@ -273,6 +325,12 @@ public class VendorConnectionService {
         .tokenExpiresAt(c.getTokenExpiresAt())
         .lastSyncedAt(c.getLastSyncedAt())
         .sensorExpiresAt(primarySubject != null ? primarySubject.getSensorExpiresAt() : null)
+        .pollingIntervalSeconds(c.getPollingIntervalSeconds())
+        .defaultPollingIntervalSeconds(
+            c.getVendorType() == null
+                ? null
+                : c.getVendorType().getDefaultPollingIntervalSeconds())
+        .effectivePollingIntervalSeconds(effectivePollingIntervalSeconds(c))
         .build();
   }
 }

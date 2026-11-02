@@ -6,6 +6,30 @@
 
 - 欧泰 (Ottai)
 - 硅基轻享 (SiSensing)
+- 微泰 (MicroTech / AiDEX X)
+
+各渠道差异：
+
+| 渠道 | 接入方式 | 数据节奏 | 默认轮询 |
+| --- | --- | --- | --- |
+| 欧泰 | 微信小程序抓包粘贴 access token | 5 分钟 | 5 分钟 |
+| 硅基轻享 | 账号密码直连，或粘贴 access token | 5 分钟 | 5 分钟 |
+| 微泰（AiDEX X） | 分享/关注（网关登录被分享账号） | 1 分钟 | 1 分钟（可在仪表盘调整） |
+
+> 微泰接口的逆向结论见 [doc/微泰/微泰-AiDEX-API逆向分析.md](doc/微泰/微泰-AiDEX-API逆向分析.md)。
+>
+> ⚠️ 微泰是**单会话**账号体系：同一账号登录会顶掉上一个会话（接口返回 `802`），
+> 而 AiDEX X 的数据要靠手机 App 蓝牙采集上传，主账号被顶下线就没有新数据了。
+>
+> ✅ 因此微泰渠道采用**双账号（分享/关注）**接入：
+> 1. 在主账号的 App 里把数据分享给第二个微泰账号（一次即可）；
+> 2. 在 Hedwig「连接设备 → 微泰」里填**被分享账号**的手机号与密码；
+> 3. 网关用第二个账号登录并带 `userId=<主账号>` 读取数据，手机主账号不受影响。
+>
+> 接口细节见文档 §4.4。
+>
+> ⏱ 延迟参考：微泰手机端上传本身有 13~42s 抖动，Hedwig 轮询再加 1~14s，
+> **端到端典型 30~35s、最坏约 1 分钟**；不丢数据（唯一键 + 断连回填），只是可能晚到。详见文档 §6.4。
 
 ## 架构概览
 
@@ -178,6 +202,7 @@ sudo journalctl -u hedwig -f     # 查看日志
 | POST   | `/api/vendors/connections/token`         | 通过 Token 连接设备  |
 | POST   | `/api/vendors/connections/login`         | 通过账号密码连接设备 |
 | POST   | `/api/vendors/connections/{id}/refresh`  | 刷新设备 Token       |
+| PATCH  | `/api/vendors/connections/{id}/polling-interval` | 调整轮询间隔（秒），`{"seconds": null}` 恢复厂商默认值 |
 | DELETE | `/api/vendors/connections/{id}`          | 断开设备连接         |
 
 ### 血糖数据
