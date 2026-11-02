@@ -11,12 +11,14 @@ import {
   nightscoutSync,
 } from '../api/nightscout';
 import { getConnections } from '../api/vendors';
+import { parseTimestampMs } from '../utils/time';
+import { formatAge } from '../components/Freshness';
 import type { NightscoutTarget, NightscoutTargetRequest } from '../types/nightscout';
 import type { VendorConnection } from '../types';
 import NightscoutTargetCard from '../components/NightscoutTargetCard';
 import NightscoutTargetModal from '../components/NightscoutTargetModal';
 
-const { Title, Paragraph } = Typography;
+const { Title, Paragraph, Text } = Typography;
 
 const SettingsPage: React.FC = () => {
   const [targets, setTargets] = useState<NightscoutTarget[]>([]);
@@ -132,40 +134,73 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const errorCount = targets.filter((t) => Boolean(t.lastErrorMessage)).length;
+  const latestPush = targets
+    .map((t) => t.lastSuccessAt || t.lastPushAt)
+    .filter((v): v is string => Boolean(v))
+    .sort()
+    .pop();
+  const latestPushMs = latestPush ? parseTimestampMs(latestPush) : null;
+  const latestPushText =
+    latestPushMs === null ? '—' : formatAge(Math.max(0, Date.now() - latestPushMs));
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      {/* 标题 + 操作栏 */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 24,
-          flexWrap: 'wrap',
-          gap: 12,
-        }}
-      >
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.3 }}
+      className="detail-page"
+    >
+      <header className="detail-head">
         <div>
-          <Title level={3} style={{ margin: 0 }}>
-            {'Nightscout配置'}
+          <span className="section-eyebrow">Nightscout</span>
+          <Title level={3} className="detail-title">
+            推送配置
           </Title>
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            {'管理 Nightscout 数据推送目标与同步'}
-          </Paragraph>
+          <Text type="secondary" className="detail-sub">
+            血糖数据会按分钟推送到这里的 Nightscout 服务
+          </Text>
         </div>
-        <Space>
-          <Button
-            icon={<CloudUploadOutlined />}
-            loading={syncing}
-            onClick={handleSync}
-          >
-            {syncing ? '同步中...' : '手动同步'}
+        <div className="detail-actions">
+          <Button icon={<CloudUploadOutlined />} loading={syncing} onClick={handleSync}>
+            {syncing ? '同步中…' : '手动同步'}
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            {'添加目标'}
+            添加目标
           </Button>
-        </Space>
-      </div>
+        </div>
+      </header>
+
+      {!loading && !error && targets.length > 0 && (
+        <div className="detail-stats">
+          <div className="detail-stat">
+            <span className="status-label">目标</span>
+            <span className="detail-stat-value">{targets.length}</span>
+            <span className="detail-stat-note">已配置的 Nightscout</span>
+          </div>
+          <div className="detail-stat">
+            <span className="status-label">启用中</span>
+            <span className="detail-stat-value detail-stat-accent">
+              {targets.filter((t) => t.status !== 'DISABLED').length}
+            </span>
+            <span className="detail-stat-note">正在接收数据</span>
+          </div>
+          <div className="detail-stat">
+            <span className="status-label">最近推送</span>
+            <span className="detail-stat-value">
+              {latestPushText}
+            </span>
+            <span className="detail-stat-note">所有目标里最新的一次</span>
+          </div>
+          <div className="detail-stat">
+            <span className="status-label">异常</span>
+            <span className={`detail-stat-value ${errorCount > 0 ? 'detail-stat-warn' : ''}`}>
+              {errorCount}
+            </span>
+            <span className="detail-stat-note">含错误信息的目标</span>
+          </div>
+        </div>
+      )}
 
       {/* 内容区 */}
       {loading ? (
@@ -180,24 +215,34 @@ const SettingsPage: React.FC = () => {
         <Alert type="error" message={`加载失败：${error}`} showIcon />
       ) : targets.length === 0 ? (
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.3 }}
-          style={{ textAlign: 'center', padding: '60px 0' }}
+          className="dashboard-panel dashboard-empty-panel"
         >
-          <div style={{ fontSize: 64, marginBottom: 16 }}>{'🌙'}</div>
-          <Paragraph type="secondary" style={{ fontSize: 16 }}>
-            {'还没有配置 Nightscout 推送目标'}
-          </Paragraph>
-          <Paragraph type="secondary">
-            {'添加一个目标后，血糖数据将自动推送到您的 Nightscout 服务'}
-          </Paragraph>
-          <Button type="primary" size="large" onClick={handleCreate}>
-            {'添加第一个目标'}
+          <div className="dashboard-empty-owl">🌙</div>
+          <h3 className="dashboard-empty-title">还没有 Nightscout 目标</h3>
+          <p className="dashboard-empty-desc">
+            添加一个目标后，血糖数据会在入库后自动推送过去，箭头趋势也会一起同步。
+          </p>
+          <div className="empty-channel-list">
+            {[
+              { name: '站点地址', how: 'https://你的 Nightscout 域名' },
+              { name: 'API Secret', how: 'Nightscout 的 api_secret' },
+              { name: '绑定对象', how: '选择要推送的监测对象' },
+            ].map((c) => (
+              <div className="empty-channel" key={c.name}>
+                <span className="empty-channel-name">{c.name}</span>
+                <span className="empty-channel-how">{c.how}</span>
+              </div>
+            ))}
+          </div>
+          <Button type="primary" size="large" icon={<PlusOutlined />} onClick={handleCreate}>
+            添加第一个目标
           </Button>
         </motion.div>
       ) : (
-        <Row gutter={[16, 16]}>
+        <Row gutter={[16, 16]} className="settings-grid">
           {targets.map((target, idx) => (
             <Col xs={24} sm={12} lg={8} key={target.id}>
               <NightscoutTargetCard

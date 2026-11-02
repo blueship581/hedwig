@@ -2,21 +2,11 @@ import React from 'react';
 import { Alert } from 'antd';
 import { WarningOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { motion, AnimatePresence } from 'framer-motion';
-import { TokenStatus, VendorConnection, VendorType } from '../types';
+import { TokenStatus, VendorConnection } from '../types';
+import { vendorDisplayName } from '../utils/vendor';
 
 interface Props {
   connections: VendorConnection[];
-}
-
-function vendorDisplayName(vt: VendorType): string {
-  switch (vt) {
-    case VendorType.OTTAI:
-      return '欧泰';
-    case VendorType.SISENSING:
-      return '硅基轻享';
-    default:
-      return String(vt);
-  }
 }
 
 const AlertBanner: React.FC<Props> = ({ connections }) => {

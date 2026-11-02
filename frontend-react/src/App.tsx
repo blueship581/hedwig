@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ConfigProvider, App as AntApp, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
@@ -25,6 +25,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 const App: React.FC = () => {
   const { isDark } = useThemeStore();
   const themeConfig = isDark ? darkTheme : lightTheme;
+
+  // CSS 里的明暗变量全部挂在 [data-theme] 上；不写这个属性，切换主题时只有 antd 组件会变。
+  useEffect(() => {
+    document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+    document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+  }, [isDark]);
 
   return (
     <ConfigProvider theme={themeConfig} locale={zhCN}>

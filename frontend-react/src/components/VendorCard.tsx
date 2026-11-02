@@ -1,28 +1,20 @@
-import React from 'react';
-import { Button, Typography, Popconfirm, Tag } from 'antd';
+import React, { useState } from 'react';
+import { Button, Typography, Popconfirm, Tag, Select, message } from 'antd';
 import { DeleteOutlined, RightOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { VendorConnection, VendorType, TokenStatus } from '../types';
+import { updatePollingInterval } from '../api/vendors';
 import { formatRemainingTime } from '../utils/time';
+import { pollingIntervalOptions, vendorDisplayName } from '../utils/vendor';
 
 const { Text } = Typography;
 
 interface Props {
   connection: VendorConnection;
   onDelete: (id: number) => void;
+  onUpdated?: () => void;
   index?: number;
-}
-
-function vendorDisplayName(vt: VendorType): string {
-  switch (vt) {
-    case VendorType.OTTAI:
-      return '欧泰';
-    case VendorType.SISENSING:
-      return '硅基轻享';
-    default:
-      return String(vt);
-  }
 }
 
 const dotColor: Record<TokenStatus, string> = {
@@ -37,9 +29,10 @@ const statusLabel: Record<TokenStatus, { text: string; color: string }> = {
   [TokenStatus.EXPIRED]: { text: '已过期', color: '#e05c5c' },
 };
 
-const VendorCard: React.FC<Props> = ({ connection, onDelete, index = 0 }) => {
+const VendorCard: React.FC<Props> = ({ connection, onDelete, onUpdated, index = 0 }) => {
   const navigate = useNavigate();
   const c = connection;
+  const [savingInterval, setSavingInterval] = useState(false);
 
   const sensorRemaining = c.sensorExpiresAt ? formatRemainingTime(c.sensorExpiresAt) : null;
   const dot = dotColor[c.tokenStatus];
@@ -61,7 +54,7 @@ const VendorCard: React.FC<Props> = ({ connection, onDelete, index = 0 }) => {
         <div>
           <div className="dashboard-device-vendor">{vendorDisplayName(c.vendorType)}</div>
           <div className="dashboard-device-subject">
-            {c.primarySubjectName ?? '未发现监测对象'}
+            {c.primarySubjectName || '未发现监测对象'}
           </div>
         </div>
       </div>
@@ -92,6 +85,28 @@ const VendorCard: React.FC<Props> = ({ connection, onDelete, index = 0 }) => {
         >
           {status.text}
         </Tag>
+        <Select
+          size="small"
+          variant="borderless"
+          loading={savingInterval}
+          value={c.effectivePollingIntervalSeconds ?? c.defaultPollingIntervalSeconds ?? 300}
+          options={pollingIntervalOptions(c.vendorType)}
+          style={{ width: 104, fontSize: 12 }}
+          popupMatchSelectWidth={false}
+          title="轮询频率：多久向厂商查询一次新血糖"
+          onChange={async (seconds) => {
+            setSavingInterval(true);
+            try {
+              await updatePollingInterval(c.id, seconds);
+              message.success('轮询频率已更新');
+              onUpdated?.();
+            } catch (e: any) {
+              message.error(e.message);
+            } finally {
+              setSavingInterval(false);
+            }
+          }}
+        />
       </div>
 
       {/* Actions */}

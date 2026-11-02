@@ -4,10 +4,12 @@ import { PlusOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { getConnections, deleteConnection } from '../api/vendors';
+import { listTargets } from '../api/nightscout';
 import { VendorConnection } from '../types';
 import VendorCard from '../components/VendorCard';
 import AlertBanner from '../components/AlertBanner';
 import GlucoseHero from '../components/GlucoseHero';
+import StatusStrip from '../components/StatusStrip';
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -17,9 +19,19 @@ function getGreeting(): string {
   return '晚上好';
 }
 
+function effectiveInterval(conn: VendorConnection): number {
+  return (
+    conn.effectivePollingIntervalSeconds ??
+    conn.pollingIntervalSeconds ??
+    conn.defaultPollingIntervalSeconds ??
+    300
+  );
+}
+
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [connections, setConnections] = useState<VendorConnection[]>([]);
+  const [nightscoutTargets, setNightscoutTargets] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,6 +50,9 @@ const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchConnections();
+    listTargets()
+      .then((targets) => setNightscoutTargets(targets.filter((t) => t.status !== 'DISABLED').length))
+      .catch(() => setNightscoutTargets(null));
   }, [fetchConnections]);
 
   const handleDelete = async (id: number) => {
@@ -60,7 +75,7 @@ const DashboardPage: React.FC = () => {
       className="dashboard-page"
     >
       {/* ── Page header ── */}
-      <motion.div
+      <motion.header
         className="dashboard-header"
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -68,7 +83,11 @@ const DashboardPage: React.FC = () => {
       >
         <div>
           <h2 className="dashboard-greeting">{getGreeting()}</h2>
-          <p className="dashboard-greeting-sub">血糖监测一览</p>
+          <p className="dashboard-greeting-sub">
+            {connections.length > 0
+              ? `${connections.length} 个渠道在同步 · 数据每分钟刷新`
+              : '连接一个 CGM 设备，开始实时监测'}
+          </p>
         </div>
         <Button
           type="default"
@@ -78,16 +97,13 @@ const DashboardPage: React.FC = () => {
         >
           添加设备
         </Button>
-      </motion.div>
+      </motion.header>
 
       {/* ── Loading skeleton ── */}
       {loading && (
         <div className="dashboard-skeleton-wrap">
           <div className="dashboard-panel">
-            <Skeleton active paragraph={{ rows: 2 }} title={{ width: 160 }} />
-          </div>
-          <div className="dashboard-panel">
-            <Skeleton active paragraph={{ rows: 4 }} title={{ width: 100 }} />
+            <Skeleton active paragraph={{ rows: 3 }} title={{ width: 160 }} />
           </div>
         </div>
       )}
@@ -95,24 +111,35 @@ const DashboardPage: React.FC = () => {
       {/* ── Error state ── */}
       {!loading && error && (
         <div className="dashboard-panel" style={{ textAlign: 'center', padding: 48 }}>
-          <Empty
-            description={`加载失败：${error}`}
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-          />
+          <Empty description={`加载失败：${error}`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
         </div>
       )}
 
       {/* ── Empty state ── */}
       {!loading && !error && connections.length === 0 && (
         <motion.div
-          initial={{ opacity: 0, scale: 0.96 }}
+          initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.4 }}
           className="dashboard-panel dashboard-empty-panel"
         >
           <div className="dashboard-empty-owl">🦉</div>
           <h3 className="dashboard-empty-title">还没有连接任何设备</h3>
-          <p className="dashboard-empty-desc">连接您的 CGM 设备，开始实时监测血糖数据</p>
+          <p className="dashboard-empty-desc">
+            支持欧泰、硅基轻享、微泰三个渠道，连上之后每分钟自动取一次血糖并推送到 Nightscout。
+          </p>
+          <div className="empty-channel-list">
+            {[
+              { name: '欧泰', how: '微信小程序抓包拿到 access token' },
+              { name: '硅基轻享', how: '账号密码直连，或粘贴 token' },
+              { name: '微泰（AiDEX X）', how: '分享给第二个账号，用被分享账号接入' },
+            ].map((c) => (
+              <div className="empty-channel" key={c.name}>
+                <span className="empty-channel-name">{c.name}</span>
+                <span className="empty-channel-how">{c.how}</span>
+              </div>
+            ))}
+          </div>
           <Button
             type="primary"
             size="large"
@@ -127,12 +154,21 @@ const DashboardPage: React.FC = () => {
       {/* ── Main content ── */}
       {!loading && !error && connections.length > 0 && (
         <>
-          {/* Glucose hero cards */}
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.08 }}
+          >
+            <StatusStrip connections={connections} nightscoutTargets={nightscoutTargets} />
+          </motion.div>
+
+          <AlertBanner connections={connections} />
+
           {heroConnections.length > 0 && (
             <motion.section
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
+              transition={{ duration: 0.4, delay: 0.12 }}
               className="dashboard-section"
             >
               <div className="dashboard-hero-grid">
@@ -140,42 +176,35 @@ const DashboardPage: React.FC = () => {
                   <GlucoseHero
                     key={c.id}
                     subjectId={c.primarySubjectId!}
-                    subjectName={c.primarySubjectName ?? `对象 ${c.primarySubjectId}`}
+                    subjectName={c.primarySubjectName || `对象 ${c.primarySubjectId}`}
                     vendorType={c.vendorType}
+                    pollIntervalSeconds={effectiveInterval(c)}
                   />
                 ))}
               </div>
             </motion.section>
           )}
 
-          {/* Alert banner */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, delay: 0.2 }}
-          >
-            <AlertBanner connections={connections} />
-          </motion.div>
-
-          {/* Device connection panel */}
           <motion.section
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.25 }}
+            transition={{ duration: 0.4, delay: 0.2 }}
             className="dashboard-section"
           >
-            <div className="dashboard-panel">
-              <h4 className="dashboard-panel-title">设备连接</h4>
-              <div className="dashboard-device-list">
-                {connections.map((conn, idx) => (
-                  <VendorCard
-                    key={conn.id}
-                    connection={conn}
-                    onDelete={handleDelete}
-                    index={idx}
-                  />
-                ))}
-              </div>
+            <div className="section-head">
+              <span className="section-eyebrow">Channels</span>
+              <h4 className="section-title">设备连接</h4>
+            </div>
+            <div className="dashboard-device-list">
+              {connections.map((conn, idx) => (
+                <VendorCard
+                  key={conn.id}
+                  connection={conn}
+                  onDelete={handleDelete}
+                  onUpdated={fetchConnections}
+                  index={idx}
+                />
+              ))}
             </div>
           </motion.section>
         </>

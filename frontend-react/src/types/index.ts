@@ -16,6 +16,7 @@ export interface AuthResponse {
 export enum VendorType {
   OTTAI = 'OTTAI',
   SISENSING = 'SISENSING',
+  MICROTECH = 'MICROTECH',
 }
 
 export enum TokenStatus {
@@ -34,6 +35,12 @@ export interface VendorConnection {
   tokenExpiresAt?: string;
   lastSyncedAt?: string;
   sensorExpiresAt?: string;
+  /** 用户设置的轮询间隔（秒）；为空表示跟随厂商默认值。 */
+  pollingIntervalSeconds?: number;
+  /** 厂商默认轮询间隔（秒）：微泰 60，欧泰/硅基 300。 */
+  defaultPollingIntervalSeconds?: number;
+  /** 实际生效的轮询间隔（秒）。 */
+  effectivePollingIntervalSeconds?: number;
 }
 
 export interface ConnectTokenRequest {

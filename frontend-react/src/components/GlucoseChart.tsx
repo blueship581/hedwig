@@ -9,20 +9,50 @@ interface Props {
   readings: GlucoseReading[];
 }
 
+const LOW = 3.9;
+const HIGH = 10;
+
+function zoneOf(v: number): 'low' | 'target' | 'high' {
+  if (v < LOW) return 'low';
+  if (v > HIGH) return 'high';
+  return 'target';
+}
+
+const ZONE_COLORS: Record<string, string> = {
+  low: '#e0a84b',
+  target: '#4ecdc4',
+  high: '#e05c5c',
+};
+
 const GlucoseChart: React.FC<Props> = ({ readings }) => {
   const { isDark } = useThemeStore();
 
   const data = useMemo(() => {
-    return readings
+    const points = readings
       .map((r) => {
         const ms = parseTimestampMs(r.readingTime);
         return ms !== null ? { time: ms, value: r.glucoseMmol } : null;
       })
       .filter(Boolean)
-      .sort((a, b) => a!.time - b!.time) as {
-      time: number;
-      value: number;
-    }[];
+      .sort((a, b) => a!.time - b!.time) as { time: number; value: number }[];
+
+    // 按「低 / 达标 / 高」拆成三条线，跨阈值处把交点补进相邻区间，视觉上仍然连贯。
+    // 这样颜色本身就是信息：不用看图例也能看出哪段超标。
+    const withZone: { time: number; value: number; zone: string }[] = [];
+    points.forEach((p, i) => {
+      const zone = zoneOf(p.value);
+      if (i > 0) {
+        const prev = points[i - 1];
+        const prevZone = zoneOf(prev.value);
+        if (prevZone !== zone) {
+          // 交点同时进入两条线，颜色切换处才不会出现断口
+          withZone.push({ time: prev.time, value: prev.value, zone });
+          withZone.push({ time: p.time, value: p.value, zone: prevZone });
+        }
+      }
+      withZone.push({ ...p, zone });
+    });
+    return withZone;
   }, [readings]);
 
   if (data.length === 0) {
@@ -34,12 +64,15 @@ const GlucoseChart: React.FC<Props> = ({ readings }) => {
     xField: 'time',
     yField: 'value',
     shapeField: 'smooth',
-    height: 320,
+    colorField: 'zone',
+    height: 300,
     autoFit: true,
     scale: {
+      color: { domain: ['low', 'target', 'high'], range: ['#e0a84b', '#4ecdc4', '#e05c5c'] },
       x: { type: 'time' as const },
       y: { domainMin: 2, domainMax: 20 },
     },
+    legend: false,
     axis: {
       x: {
         labelFormatter: (v: string | number | Date) => {
@@ -50,7 +83,6 @@ const GlucoseChart: React.FC<Props> = ({ readings }) => {
       y: {},
     },
     style: {
-      stroke: '#c8a44e',
       lineWidth: 2,
     },
     tooltip: {

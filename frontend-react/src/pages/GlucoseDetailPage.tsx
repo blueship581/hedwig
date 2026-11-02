@@ -1,36 +1,27 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Typography,
-  Space,
-  Select,
-  Button,
-  Card,
-  Row,
-  Col,
-  Statistic,
-  Skeleton,
-  Alert,
-  Empty,
-  message,
-} from 'antd';
+import { Typography, Segmented, Button, Skeleton, Alert, message } from 'antd';
 import { ArrowLeftOutlined, SyncOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { getHistory, syncHistory } from '../api/glucose';
 import { GlucoseReading } from '../types';
-import { parseTimestampMs, glucoseColor, glucoseClass } from '../utils/time';
+import { parseTimestampMs, glucoseColor } from '../utils/time';
 import GlucoseChart from '../components/GlucoseChart';
 import GlucoseTable from '../components/GlucoseTable';
+import Freshness from '../components/Freshness';
 
-const { Title, Paragraph, Text } = Typography;
+const { Title, Text } = Typography;
 
-const HOURS_OPTIONS = [
-  { label: '\u6700\u8fd16\u5c0f\u65f6', value: 6 },
-  { label: '\u6700\u8fd112\u5c0f\u65f6', value: 12 },
-  { label: '\u6700\u8fd124\u5c0f\u65f6', value: 24 },
-  { label: '\u6700\u8fd148\u5c0f\u65f6', value: 48 },
-  { label: '\u6700\u8fd172\u5c0f\u65f6', value: 72 },
+const RANGE_OPTIONS = [
+  { label: '6 小时', value: 6 },
+  { label: '12 小时', value: 12 },
+  { label: '24 小时', value: 24 },
+  { label: '48 小时', value: 48 },
+  { label: '72 小时', value: 72 },
 ];
+
+const LOW = 3.9;
+const HIGH = 10;
 
 const GlucoseDetailPage: React.FC = () => {
   const { id: subjectId } = useParams<{ id: string }>();
@@ -49,11 +40,12 @@ const GlucoseDetailPage: React.FC = () => {
       try {
         const data = await getHistory(subjectId);
         const cutoff = Date.now() - hours * 3600 * 1000;
-        const filtered = data.filter((r) => {
-          const ms = parseTimestampMs(r.readingTime);
-          return ms !== null && ms >= cutoff;
-        });
-        setReadings(filtered);
+        setReadings(
+          data.filter((r) => {
+            const ms = parseTimestampMs(r.readingTime);
+            return ms !== null && ms >= cutoff;
+          }),
+        );
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -74,10 +66,10 @@ const GlucoseDetailPage: React.FC = () => {
     setError(null);
     try {
       const result = await syncHistory(subjectId);
-      setSyncMsg(`\u540c\u6b65\u6210\u529f\uff1a\u5df2\u540c\u6b65 ${result.syncedCount} \u6761\u6570\u636e`);
+      setSyncMsg(`同步完成，新增 ${result.syncedCount} 条记录`);
       fetchData(hoursBack);
     } catch (e: any) {
-      setError(`\u540c\u6b65\u5931\u8d25\uff1a${e.message}`);
+      setError(`同步失败：${e.message}`);
     } finally {
       setSyncing(false);
     }
@@ -85,124 +77,134 @@ const GlucoseDetailPage: React.FC = () => {
 
   const stats = useMemo(() => {
     const count = readings.length;
-    const avg =
-      count > 0 ? readings.reduce((sum, r) => sum + r.glucoseMmol, 0) / count : undefined;
+    if (count === 0) {
+      return { count: 0, avg: null as number | null, latest: null as GlucoseReading | null, tir: null as number | null, low: 0, high: 0 };
+    }
+    const sum = readings.reduce((acc, r) => acc + r.glucoseMmol, 0);
     const latest = readings.reduce<GlucoseReading | null>((best, r) => {
-      if (!best || r.readingTime > best.readingTime) return r;
-      return best;
+      if (!best) return r;
+      const a = parseTimestampMs(r.readingTime) ?? 0;
+      const b = parseTimestampMs(best.readingTime) ?? 0;
+      return a > b ? r : best;
     }, null);
-    return { count, avg, latest };
+    const low = readings.filter((r) => r.glucoseMmol < LOW).length;
+    const high = readings.filter((r) => r.glucoseMmol > HIGH).length;
+    return {
+      count,
+      avg: sum / count,
+      latest,
+      tir: Math.round(((count - low - high) / count) * 100),
+      low,
+      high,
+    };
   }, [readings]);
 
+  const latestMs = stats.latest ? parseTimestampMs(stats.latest.readingTime) : null;
+
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      <Space direction="vertical" size={20} style={{ width: '100%' }}>
-        <Link to="/">
-          <Button type="link" icon={<ArrowLeftOutlined />} style={{ padding: 0 }}>
-            {'\u8fd4\u56de\u4eea\u8868\u76d8'}
-          </Button>
-        </Link>
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+      className="detail-page"
+    >
+      <Link to="/" className="detail-back">
+        <ArrowLeftOutlined /> 返回仪表盘
+      </Link>
 
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 12,
-          }}
-        >
-          <div>
-            <Title level={3} style={{ margin: 0 }}>
-              {'\u8840\u7cd6\u8be6\u60c5 \u2014 '}{subjectId}
-            </Title>
-            <Paragraph type="secondary" style={{ margin: 0 }}>
-              {'\u67e5\u770b\u5386\u53f2\u8840\u7cd6\u503c\u53d8\u5316\u8d8b\u52bf'}
-            </Paragraph>
-          </div>
-          <Space>
-            <Text>{'\u65f6\u95f4\u8303\u56f4\uff1a'}</Text>
-            <Select
-              value={hoursBack}
-              options={HOURS_OPTIONS}
-              onChange={setHoursBack}
-              style={{ width: 140 }}
-            />
-            <Button icon={<ReloadOutlined />} onClick={() => fetchData(hoursBack)}>
-              {'\u5237\u65b0'}
-            </Button>
-            <Button icon={<SyncOutlined />} loading={syncing} onClick={handleSync}>
-              {syncing ? '\u540c\u6b65\u4e2d...' : '\u540c\u6b65\u6700\u8fd1\u8840\u7cd6\u6570\u636e'}
-            </Button>
-          </Space>
+      <header className="detail-head">
+        <div>
+          <span className="section-eyebrow">History</span>
+          <Title level={3} className="detail-title">
+            血糖详情
+          </Title>
+          <Text type="secondary" className="detail-sub">
+            目标范围 {LOW}–{HIGH} mmol/L · 共 {stats.count} 条记录
+          </Text>
         </div>
+        <div className="detail-actions">
+          <Segmented
+            value={hoursBack}
+            options={RANGE_OPTIONS}
+            onChange={(v) => setHoursBack(v as number)}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => fetchData(hoursBack)}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<SyncOutlined />} loading={syncing} onClick={handleSync}>
+            {syncing ? '同步中' : '回填历史'}
+          </Button>
+        </div>
+      </header>
 
-        {syncMsg && <Alert type="success" message={syncMsg} showIcon closable onClose={() => setSyncMsg(null)} />}
+      {syncMsg && (
+        <Alert type="success" message={syncMsg} showIcon closable onClose={() => setSyncMsg(null)} />
+      )}
 
-        {loading ? (
-          <Skeleton active paragraph={{ rows: 8 }} />
-        ) : error ? (
-          <Alert type="error" message={`\u52a0\u8f7d\u5931\u8d25\uff1a${error}`} showIcon />
-        ) : (
-          <>
-            {/* Summary stats */}
-            <Row gutter={16}>
-              <Col xs={24} sm={8}>
-                <Card>
-                  <Statistic
-                    title={'\u8bfb\u6570\u6761\u6570'}
-                    value={stats.count}
-                    valueStyle={{ color: '#c8a44e' }}
-                  />
-                </Card>
-              </Col>
-              {stats.avg !== undefined && (
-                <Col xs={24} sm={8}>
-                  <Card style={{ background: 'rgba(78, 205, 196, 0.06)' }}>
-                    <Statistic
-                      title={'\u5e73\u5747\u8840\u7cd6\u503c'}
-                      value={stats.avg}
-                      precision={1}
-                      suffix="mmol/L"
-                      valueStyle={{ color: '#4ecdc4' }}
-                    />
-                  </Card>
-                </Col>
+      {loading ? (
+        <Skeleton active paragraph={{ rows: 10 }} />
+      ) : error ? (
+        <Alert type="error" message={`加载失败：${error}`} showIcon />
+      ) : (
+        <>
+          <div className="detail-stats">
+            <div className="detail-stat">
+              <span className="status-label">最新</span>
+              <span
+                className="detail-stat-value"
+                style={{ color: stats.latest ? glucoseColor(stats.latest.glucoseMmol) : undefined }}
+              >
+                {stats.latest ? stats.latest.glucoseMmol.toFixed(1) : '—'}
+                <span className="detail-stat-unit">mmol/L</span>
+              </span>
+              {latestMs !== null && (
+                <Freshness at={new Date(latestMs).toISOString()} className="detail-stat-note" />
               )}
-              {stats.latest && (
-                <Col xs={24} sm={8}>
-                  <Card style={{ background: `rgba(${glucoseClass(stats.latest.glucoseMmol) === 'normal' ? '78, 205, 196' : glucoseClass(stats.latest.glucoseMmol) === 'high' ? '224, 92, 92' : '224, 168, 75'}, 0.06)` }}>
-                    <Statistic
-                      title={'\u6700\u65b0\u8840\u7cd6\u503c'}
-                      value={stats.latest.glucoseMmol}
-                      precision={1}
-                      suffix="mmol/L"
-                      valueStyle={{ color: glucoseColor(stats.latest.glucoseMmol) }}
-                    />
-                  </Card>
-                </Col>
-              )}
-            </Row>
+            </div>
 
-            {/* Chart */}
-            <Card title={'\u8840\u7cd6\u8d8b\u52bf\u56fe'}>
-              <GlucoseChart readings={readings} />
-            </Card>
+            <div className="detail-stat">
+              <span className="status-label">平均</span>
+              <span className="detail-stat-value">
+                {stats.avg !== null ? stats.avg.toFixed(1) : '—'}
+                <span className="detail-stat-unit">mmol/L</span>
+              </span>
+              <span className="detail-stat-note">区间均值</span>
+            </div>
 
-            {/* Table */}
-            <Card
-              title={'\u6570\u636e\u660e\u7ec6'}
-              extra={
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {`\u5171 ${stats.count} \u6761\u8bb0\u5f55`}
-                </Text>
-              }
-            >
-              <GlucoseTable readings={readings} />
-            </Card>
-          </>
-        )}
-      </Space>
+            <div className="detail-stat">
+              <span className="status-label">达标率 TIR</span>
+              <span className="detail-stat-value detail-stat-accent">
+                {stats.tir !== null ? `${stats.tir}%` : '—'}
+              </span>
+              <span className="detail-stat-note">
+                {stats.low} 次偏低 · {stats.high} 次偏高
+              </span>
+            </div>
+
+            <div className="detail-stat">
+              <span className="status-label">记录数</span>
+              <span className="detail-stat-value">{stats.count}</span>
+              <span className="detail-stat-note">最近 {hoursBack} 小时</span>
+            </div>
+          </div>
+
+          <section className="detail-panel">
+            <div className="section-head">
+              <span className="section-eyebrow">Trend</span>
+              <h4 className="section-title">血糖趋势</h4>
+            </div>
+            <GlucoseChart readings={readings} />
+          </section>
+
+          <section className="detail-panel">
+            <div className="section-head">
+              <span className="section-eyebrow">Records</span>
+              <h4 className="section-title">数据明细</h4>
+            </div>
+            <GlucoseTable readings={readings} />
+          </section>
+        </>
+      )}
     </motion.div>
   );
 };

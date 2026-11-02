@@ -1,40 +1,36 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Skeleton, Typography } from 'antd';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Skeleton } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { getLatest } from '../api/glucose';
-import { glucoseColor, glucoseClass, trendArrow, trendColor, parseTimestampMs } from '../utils/time';
-import type { GlucoseReading } from '../types';
+import { getHistory, getLatest } from '../api/glucose';
+import { glucoseColor, glucoseClass, trendArrow, parseTimestampMs } from '../utils/time';
+import { useNow } from '../hooks/useNow';
+import Freshness from './Freshness';
+import Sparkline, { SparkPoint } from './Sparkline';
+import GlucoseRangeBar from './GlucoseRangeBar';
+import { vendorDisplayName } from '../utils/vendor';
+import type { GlucoseReading, VendorType } from '../types';
 
-const { Text } = Typography;
-
-interface GlucoseHeroProps {
+interface Props {
   subjectId: number;
   subjectName: string;
-  vendorType: string;
+  vendorType: VendorType | string;
+  /** 该连接的轮询间隔（秒），用于「下次刷新」倒计时 */
+  pollIntervalSeconds?: number;
 }
 
-const statusBg: Record<string, { bg: string; border: string; glow: string }> = {
-  normal: {
-    bg: 'rgba(78, 205, 196, 0.06)',
-    border: 'rgba(78, 205, 196, 0.18)',
-    glow: 'rgba(78, 205, 196, 0.08)',
-  },
-  high: {
-    bg: 'rgba(224, 92, 92, 0.06)',
-    border: 'rgba(224, 92, 92, 0.18)',
-    glow: 'rgba(224, 92, 92, 0.08)',
-  },
-  low: {
-    bg: 'rgba(224, 168, 75, 0.06)',
-    border: 'rgba(224, 168, 75, 0.18)',
-    glow: 'rgba(224, 168, 75, 0.08)',
-  },
-};
+const SPARK_HOURS = 3;
 
-const GlucoseHero: React.FC<GlucoseHeroProps> = ({ subjectId, subjectName }) => {
+const GlucoseHero: React.FC<Props> = ({
+  subjectId,
+  subjectName,
+  vendorType,
+  pollIntervalSeconds = 300,
+}) => {
   const navigate = useNavigate();
+  const now = useNow(1000);
   const [reading, setReading] = useState<GlucoseReading | null>(null);
+  const [history, setHistory] = useState<GlucoseReading[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchLatest = useCallback(async () => {
@@ -43,106 +39,129 @@ const GlucoseHero: React.FC<GlucoseHeroProps> = ({ subjectId, subjectName }) => 
     setLoading(false);
   }, [subjectId]);
 
+  const fetchHistory = useCallback(async () => {
+    try {
+      const data = await getHistory(String(subjectId));
+      const cutoff = Date.now() - SPARK_HOURS * 3600 * 1000;
+      setHistory(
+        data.filter((r) => {
+          const ms = parseTimestampMs(r.readingTime);
+          return ms !== null && ms >= cutoff;
+        }),
+      );
+    } catch {
+      /* 迷你趋势失败不影响主读数 */
+    }
+  }, [subjectId]);
+
   useEffect(() => {
     fetchLatest();
-    const interval = setInterval(fetchLatest, 60_000);
-    return () => clearInterval(interval);
-  }, [fetchLatest]);
+    fetchHistory();
+    const latestTimer = window.setInterval(fetchLatest, 20_000);
+    const historyTimer = window.setInterval(fetchHistory, 60_000);
+    return () => {
+      window.clearInterval(latestTimer);
+      window.clearInterval(historyTimer);
+    };
+  }, [fetchLatest, fetchHistory]);
 
-  const relativeTime = (): string => {
-    if (!reading) return '';
-    const ms = parseTimestampMs(reading.readingTime);
-    if (ms === null) return '';
-    const diffMin = Math.floor((Date.now() - ms) / 60_000);
-    if (diffMin < 1) return '刚刚';
-    if (diffMin < 60) return `${diffMin} 分钟前`;
-    const hours = Math.floor(diffMin / 60);
-    return `${hours} 小时前`;
-  };
+  const sparkPoints = useMemo<SparkPoint[]>(
+    () =>
+      history
+        .map((r) => {
+          const t = parseTimestampMs(r.readingTime);
+          return t === null ? null : { t, v: r.glucoseMmol };
+        })
+        .filter((p): p is SparkPoint => p !== null)
+        .sort((a, b) => a.t - b.t),
+    [history],
+  );
 
-  const cls = reading ? glucoseClass(reading.glucoseMmol) : 'normal';
-  const theme = statusBg[cls];
+  const nextPollIn = useMemo(() => {
+    const ms = reading ? parseTimestampMs(reading.readingTime) : null;
+    if (ms === null) return null;
+    const due = ms + pollIntervalSeconds * 1000;
+    return Math.max(0, Math.round((due - now) / 1000));
+  }, [reading, pollIntervalSeconds, now]);
 
   if (loading) {
     return (
-      <div
-        className="dashboard-hero-card"
-        style={{
-          background: statusBg.normal.bg,
-          border: `1px solid ${statusBg.normal.border}`,
-        }}
-      >
-        <Skeleton active paragraph={{ rows: 1 }} title={{ width: 120 }} />
+      <div className="hero-card hero-card-loading">
+        <Skeleton active paragraph={{ rows: 2 }} title={{ width: 140 }} />
       </div>
     );
   }
 
   if (!reading) {
     return (
-      <div
-        className="dashboard-hero-card"
-        style={{
-          background: statusBg.normal.bg,
-          border: `1px solid ${statusBg.normal.border}`,
-          cursor: 'pointer',
-        }}
+      <button
+        type="button"
+        className="hero-card hero-card-empty"
         onClick={() => navigate(`/glucose/${subjectId}`)}
       >
-        <Text type="secondary" style={{ fontSize: 15 }}>{subjectName} - 暂无数据</Text>
-      </div>
+        <span className="hero-empty-title">{subjectName}</span>
+        <span className="hero-empty-desc">还没有收到血糖数据，确认传感器已激活并靠近手机</span>
+      </button>
     );
   }
 
+  const cls = glucoseClass(reading.glucoseMmol);
   const color = glucoseColor(reading.glucoseMmol);
+  const delta = reading.delta;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
+    <motion.article
+      initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: 'easeOut' }}
-      className="dashboard-hero-card"
-      style={{
-        background: theme.bg,
-        border: `1px solid ${theme.border}`,
-        borderLeft: `4px solid ${color}`,
-        boxShadow: `0 0 40px ${theme.glow}, 0 2px 8px rgba(0,0,0,0.1)`,
-        cursor: 'pointer',
-      }}
+      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      className={`hero-card hero-${cls}`}
       onClick={() => navigate(`/glucose/${subjectId}`)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') navigate(`/glucose/${subjectId}`);
+      }}
     >
-      {/* Main value row */}
-      <div className="dashboard-hero-value-row">
-        <span className="dashboard-hero-number" style={{ color }}>
-          {reading.glucoseMmol.toFixed(1)}
-        </span>
-        <span className="dashboard-hero-trend" style={{ color: trendColor(reading.trendDirection) }}>
-          {trendArrow(reading.trendDirection)}
-        </span>
-        <span className="dashboard-hero-unit">mmol/L</span>
-        {reading.delta !== undefined && reading.delta !== null && (
-          <span
-            className="dashboard-hero-delta"
-            style={{
-              color: reading.delta > 0
-                ? 'var(--glucose-high)'
-                : reading.delta < 0
-                ? 'var(--glucose-low)'
-                : 'var(--color-text-secondary)',
-            }}
-          >
-            {reading.delta > 0 ? '+' : ''}{reading.delta.toFixed(1)}
+      <header className="hero-head">
+        <span className="hero-subject">{subjectName}</span>
+        <span className="hero-vendor">{vendorDisplayName(vendorType as VendorType)}</span>
+      </header>
+
+      <div className="hero-body">
+        <div className="hero-main">
+          <span className="hero-value" style={{ color }}>
+            {reading.glucoseMmol.toFixed(1)}
           </span>
-        )}
+          <div className="hero-side">
+            <span className="hero-unit">mmol/L</span>
+            <span className="hero-trend" style={{ color }}>
+              {trendArrow(reading.trendDirection)}
+              {delta !== undefined && delta !== null && (
+                <span className="hero-delta">
+                  {delta > 0 ? '+' : ''}
+                  {delta.toFixed(1)}
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+        <div className="hero-spark" aria-hidden="true">
+          <Sparkline points={sparkPoints} color={color} ariaLabel={`${subjectName} 近 3 小时趋势`} />
+          <span className="hero-spark-caption">近 3 小时</span>
+        </div>
       </div>
 
-      {/* Subject info row */}
-      <div className="dashboard-hero-meta">
-        <span className="dashboard-hero-dot" style={{ background: color }} />
-        {subjectName}
-        <span className="dashboard-hero-sep">·</span>
-        {relativeTime()}
-      </div>
-    </motion.div>
+      <GlucoseRangeBar value={reading.glucoseMmol} />
+
+      <footer className="hero-foot">
+        <Freshness at={reading.readingTime} />
+        <span className="hero-foot-sep">·</span>
+        <span className="hero-next">
+          {nextPollIn === 0 ? '正在刷新' : nextPollIn !== null ? `下次 ${nextPollIn}s` : '等待下一轮'}
+        </span>
+        <span className="hero-link">查看详情 →</span>
+      </footer>
+    </motion.article>
   );
 };
 

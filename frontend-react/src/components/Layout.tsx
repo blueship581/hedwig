@@ -19,6 +19,7 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '../store/authStore';
+import { useThemeStore } from '../store/themeStore';
 import ThemeToggle from './ThemeToggle';
 
 const { Sider, Content } = AntLayout;
@@ -30,6 +31,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { username, logout } = useAuthStore();
+  const { isDark } = useThemeStore();
 
   const [collapsed, setCollapsed] = useState(() => {
     const stored = localStorage.getItem(COLLAPSED_KEY);
@@ -201,6 +203,7 @@ const Layout: React.FC = () => {
           collapsible
           collapsed={collapsed}
           onCollapse={handleCollapse}
+          theme={isDark ? 'dark' : 'light'}
           width={240}
           collapsedWidth={64}
           trigger={
